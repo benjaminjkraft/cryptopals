@@ -13,12 +13,12 @@ def to_hex(x):
     return base64.b16encode(x).lower()
 
 
-# 1.1
+# 1
 def hex_to_b64(h):
     return base64.b64encode(base64.b16decode(h, True))
 
 
-# 1.2
+# 2
 def xor_hex(a, b):
     return to_hex(bytearray(x ^ y for x, y in zip(from_hex(a), from_hex(b))))
 
@@ -86,14 +86,14 @@ def plaintext_score(x):
     return score
 
 
-# 1.3
+# 3
 def find_xor(b):
     options = [bytearray(c ^ i for c in b) for i in range(256)]
     options.sort(key=plaintext_score)
     return str(options[0])
 
 
-# 1.4
+# 4
 def find_xor_many():
     with open('4.txt') as f:
         strings = map(from_hex, filter(None, f.read().split()))
@@ -104,7 +104,7 @@ def find_xor_many():
     return str(options[0])
 
 
-# 1.5
+# 5
 def repeating_key_xor(plain, key):
     """plain and key are bytearrays, returns a bytearray"""
     return bytearray(
@@ -132,7 +132,7 @@ def keysize_score(b, keysize):
     return float(sum(dists)) / len(dists) / keysize
 
 
-# 1.6
+# 6
 def find_repeating_key_xor(b):
     keysize_distances = [(keysize, keysize_score(b, keysize))
                          for keysize in xrange(2, 41)]
@@ -153,7 +153,7 @@ def find_repeating_key_xor(b):
     return options[0]
 
 
-# 1.7
+# 7
 def aes_decrypt(b, k):
     cipher = AES.new(k, AES.MODE_ECB)
     return bytearray(cipher.decrypt(bytes(b)))
@@ -165,6 +165,6 @@ def is_ecb(b):
     return bool(len(blocks) - len(set(map(str, blocks))))
 
 
-# 1.8
+# 8
 def aes_detect(bs):
     return [b for b in bs if is_ecb(b)]
