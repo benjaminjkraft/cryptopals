@@ -20,7 +20,7 @@ def hex_to_b64(h):
 
 # 2
 def xor_hex(a, b):
-    return to_hex(bytearray(x ^ y for x, y in zip(from_hex(a), from_hex(b))))
+    return to_hex(xor_bytearrays(from_hex(a), from_hex(b)))
 
 
 # http://www.math.cornell.edu/~mec/2003-2004/cryptography/subs/frequencies.html
@@ -107,8 +107,7 @@ def find_xor_many():
 # 5
 def repeating_key_xor(plain, key):
     """plain and key are bytearrays, returns a bytearray"""
-    return bytearray(
-        c ^ k for c, k in itertools.izip(plain, itertools.cycle(key)))
+    return xor_bytearrays(plain, itertools.cycle(key))
 
 
 def num_ones(byte):
@@ -121,7 +120,7 @@ def num_ones(byte):
 
 
 def hamming_distance(a, b):
-    return sum(num_ones(i ^ j) for i, j in itertools.izip(a, b))
+    return sum(map(num_ones, xor_bytearrays(a, b)))
 
 
 def keysize_score(b, keysize):
@@ -154,9 +153,14 @@ def find_repeating_key_xor(b):
 
 
 # 7
-def aes_decrypt(b, k):
-    cipher = AES.new(k, AES.MODE_ECB)
+def aes_ecb_decrypt(b, k):
+    cipher = AES.new(bytes(k), AES.MODE_ECB)
     return bytearray(cipher.decrypt(bytes(b)))
+
+
+def aes_ecb_encrypt(b, k):
+    cipher = AES.new(bytes(k), AES.MODE_ECB)
+    return bytearray(cipher.encrypt(bytes(b)))
 
 
 def is_ecb(b):
@@ -168,3 +172,26 @@ def is_ecb(b):
 # 8
 def aes_detect(bs):
     return [b for b in bs if is_ecb(b)]
+
+
+# 9
+def pkcs7_pad(bs, block_length):
+    assert block_length < 256
+    bytes_to_pad = -len(bs) % block_length
+    return bs + chr(bytes_to_pad) * bytes_to_pad
+
+
+def xor_bytearrays(a, b):
+    return bytearray(x ^ y for x, y in itertools.izip(a, b))
+
+
+# 10
+def aes_cbc_decrypt(b, k, iv):
+    assert len(b) % 16 == 0
+    last_ct = iv
+    pt = bytearray()
+    for i in xrange(0, len(b), 16):
+        this_ct = b[i:i + 16]
+        pt += xor_bytearrays(aes_ecb_decrypt(this_ct, k), last_ct)
+        last_ct = this_ct
+    return pt
