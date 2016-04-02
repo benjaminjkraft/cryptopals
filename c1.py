@@ -2,6 +2,8 @@ import base64
 import collections
 import itertools
 
+from Crypto.Cipher import AES
+
 
 def from_hex(x):
     return bytearray(base64.b16decode(x, True))
@@ -149,3 +151,20 @@ def find_repeating_key_xor(b):
     options = [(key, repeating_key_xor(b, key)) for key in key_options]
     options.sort(key=lambda x: plaintext_score(x[1]))
     return options[0]
+
+
+# 1.7
+def aes_decrypt(b, k):
+    cipher = AES.new(k, AES.MODE_ECB)
+    return bytearray(cipher.decrypt(bytes(b)))
+
+
+def is_ecb(b):
+    assert len(b) % 16 == 0
+    blocks = [b[i:i + 16] for i in xrange(0, len(b), 16)]
+    return bool(len(blocks) - len(set(map(str, blocks))))
+
+
+# 1.8
+def aes_detect(bs):
+    return [b for b in bs if is_ecb(b)]
