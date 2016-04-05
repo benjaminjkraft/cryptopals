@@ -1,6 +1,8 @@
 import base64
 import collections
 import itertools
+import os
+import random
 
 from Crypto.Cipher import AES
 
@@ -175,7 +177,7 @@ def aes_detect(bs):
 
 
 # 9
-def pkcs7_pad(bs, block_length):
+def pkcs7_pad(bs, block_length=16):
     assert block_length < 256
     bytes_to_pad = -len(bs) % block_length
     return bs + chr(bytes_to_pad) * bytes_to_pad
@@ -195,3 +197,96 @@ def aes_cbc_decrypt(b, k, iv):
         pt += xor_bytearrays(aes_ecb_decrypt(this_ct, k), last_ct)
         last_ct = this_ct
     return pt
+
+
+def aes_cbc_encrypt(b, k, iv):
+    assert len(b) % 16 == 0
+    last_ct = iv
+    ct = bytearray()
+    for i in xrange(0, len(b), 16):
+        this_pt = b[i:i + 16]
+        last_ct = aes_ecb_encrypt(xor_bytearrays(this_pt, last_ct), k)
+        ct += last_ct
+    return ct
+
+
+def rand_aes_key():
+    return os.urandom(16)
+
+
+def encrypt_either_ecb_cbc(b):
+    k = rand_aes_key()
+    iv = bytearray(rand_aes_key())
+    b = pkcs7_pad(bytearray(os.urandom(random.randrange(5, 11))) + b +
+                  bytearray(os.urandom(random.randrange(5, 11))))
+    if random.randrange(2) == 0:
+        return ("ecb", aes_ecb_encrypt(b, k))
+    else:
+        return ("cbc", aes_cbc_encrypt(b, k, iv))
+
+
+# 11
+def detect_ecb_cbc():
+    pt = bytearray('x' * 64)
+    mode, ct = encrypt_either_ecb_cbc(pt)
+    if ct[16:32] == ct[32:48]:
+        our_mode = 'ecb'
+    else:
+        our_mode = 'cbc'
+    if mode == our_mode:
+        return True
+    else:
+        print mode, pt, ct
+        return False
+
+
+KEY_12 = rand_aes_key()
+APPEND_12 = bytearray(base64.b64decode("""
+    Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkg
+    aGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBq
+    dXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUg
+    YnkK
+    """))
+
+
+def encrypt_ecb_12(b):
+    pt = pkcs7_pad(b + APPEND_12)
+    return aes_ecb_encrypt(pt, KEY_12)
+
+
+def decrypt_ecb_12():
+    last_value = encrypt_ecb_12('')
+    for i in itertools.count(1):
+        this_value = encrypt_ecb_12('A' * i)
+        if this_value[:8] == last_value[:8]:
+            break
+        else:
+            last_value = this_value
+    block_size = i - 1
+    assert block_size == 16, block_size
+
+    pt = bytearray('A' * (4 * block_size))
+    ct = encrypt_ecb_12(pt)
+    # Detect ECB
+    assert ct[block_size:2 * block_size] == ct[2 * block_size:3 * block_size]
+
+    pt = bytearray('')
+    for j in xrange(10):
+        for i in xrange(block_size):
+            bytes_to_check = block_size * (j + 1)
+            aaa = bytearray('A' * (block_size - 1 - i))
+            possible_cts = {
+                bytes(encrypt_ecb_12(aaa + pt + c)[:bytes_to_check]): c
+                for c in map(chr, xrange(256))
+            }
+            try:
+                next_char = possible_cts[
+                    bytes(encrypt_ecb_12(aaa)[:bytes_to_check])]
+            except:
+                # We'll pick up the first bit of padding.
+                return pt[:-1]
+            pt += next_char
+    return pt
+
+
+
