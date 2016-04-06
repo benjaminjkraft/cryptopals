@@ -3,6 +3,8 @@ import collections
 import itertools
 import os
 import random
+import urlparse
+import urllib
 
 from Crypto.Cipher import AES
 
@@ -161,6 +163,7 @@ def aes_ecb_decrypt(b, k):
 
 
 def aes_ecb_encrypt(b, k):
+    b = pkcs7_pad(b)
     cipher = AES.new(bytes(k), AES.MODE_ECB)
     return bytearray(cipher.encrypt(bytes(b)))
 
@@ -180,6 +183,8 @@ def aes_detect(bs):
 def pkcs7_pad(bs, block_length=16):
     assert block_length < 256
     bytes_to_pad = -len(bs) % block_length
+    if bytes_to_pad == 0:
+        bytes_to_pad = block_length
     return bs + chr(bytes_to_pad) * bytes_to_pad
 
 
@@ -200,7 +205,7 @@ def aes_cbc_decrypt(b, k, iv):
 
 
 def aes_cbc_encrypt(b, k, iv):
-    assert len(b) % 16 == 0
+    b = pkcs7_pad(b)
     last_ct = iv
     ct = bytearray()
     for i in xrange(0, len(b), 16):
@@ -226,9 +231,9 @@ def encrypt_either_ecb_cbc(b):
 
 
 # 11
-def detect_ecb_cbc():
+def detect_ecb_cbc(encrypt_fn):
     pt = bytearray('x' * 64)
-    mode, ct = encrypt_either_ecb_cbc(pt)
+    mode, ct = encrypt_fn(pt)
     if ct[16:32] == ct[32:48]:
         our_mode = 'ecb'
     else:
@@ -254,10 +259,12 @@ def encrypt_ecb_12(b):
     return aes_ecb_encrypt(pt, KEY_12)
 
 
-def decrypt_ecb_12():
-    last_value = encrypt_ecb_12('')
+# 12
+def decrypt_ecb(encrypt_fn):
+    # Detect block size
+    last_value = encrypt_fn('')
     for i in itertools.count(1):
-        this_value = encrypt_ecb_12('A' * i)
+        this_value = encrypt_fn('A' * i)
         if this_value[:8] == last_value[:8]:
             break
         else:
@@ -265,28 +272,67 @@ def decrypt_ecb_12():
     block_size = i - 1
     assert block_size == 16, block_size
 
-    pt = bytearray('A' * (4 * block_size))
-    ct = encrypt_ecb_12(pt)
     # Detect ECB
+    pt = bytearray('A' * (4 * block_size))
+    ct = encrypt_fn(pt)
     assert ct[block_size:2 * block_size] == ct[2 * block_size:3 * block_size]
 
+    # Length-extension attack
     pt = bytearray('')
-    for j in xrange(10):
-        for i in xrange(block_size):
+    for j in itertools.count():  # index of block to work on
+        for i in xrange(block_size):  # index of byte to work on (from end)
             bytes_to_check = block_size * (j + 1)
-            aaa = bytearray('A' * (block_size - 1 - i))
+            padding = bytearray('A' * (block_size - 1 - i))
             possible_cts = {
-                bytes(encrypt_ecb_12(aaa + pt + c)[:bytes_to_check]): c
+                bytes(encrypt_fn(padding + pt + c)[:bytes_to_check]): c
                 for c in map(chr, xrange(256))
             }
             try:
                 next_char = possible_cts[
-                    bytes(encrypt_ecb_12(aaa)[:bytes_to_check])]
+                    bytes(encrypt_fn(padding)[:bytes_to_check])]
             except:
-                # We'll pick up the first bit of padding.
+                # If we don't find it, that means we finished the end of the
+                # ciphertext, and also picked up a byte of padding; remove it
+                # and return.
                 return pt[:-1]
             pt += next_char
-    return pt
 
 
+def urldecode(s):
+    return {k: v[0] for k, v in urlparse.parse_qs(s).items()}
 
+
+def profile_for(email):
+    return ("email=%s&uid=10&role=user" %
+            email.replace('=', '%3D').replace('&', '%26'))
+
+
+KEY_13 = rand_aes_key()
+
+
+def encrypt_profile_for(email):
+    return aes_ecb_encrypt(profile_for(email), KEY_13)
+
+
+def pkcs_unpad(b):
+    num_bytes = b[-1]
+    if len(set(b[-num_bytes:])) == 1:
+        return b[:-num_bytes]
+    else:
+        raise ValueError("incorrect padding on %s" % base64.b64encode(b))
+
+
+def decrypt_profile(prof):
+    return urldecode(bytes(pkcs_unpad(aes_ecb_decrypt(prof, KEY_13))))
+
+
+# 13
+def admin_profile():
+    # pad email= to put admin in a new block, then pad admin to fill a block.
+    encrypted_admin = encrypt_profile_for(
+        '\x0a' * 10 + 'admin' + '\x0b' * 11 + '@example.com')[16:32]
+    # 'email=&uid=10&role=' is 19 chars; we want to fill a block, so we use
+    # 'x@example.com' to fill out 32, and then grab only the first 2 blocks to
+    # truncate the "user".
+    encrypted_prof = encrypt_profile_for('x@example.com')[:32]
+    return encrypted_prof + encrypted_admin
