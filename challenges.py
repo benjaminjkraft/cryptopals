@@ -314,7 +314,7 @@ def encrypt_profile_for(email):
     return aes_ecb_encrypt(profile_for(email), KEY_13)
 
 
-def pkcs_unpad(b):
+def pkcs7_unpad(b):
     num_bytes = b[-1]
     if len(set(b[-num_bytes:])) == 1:
         return b[:-num_bytes]
@@ -323,7 +323,7 @@ def pkcs_unpad(b):
 
 
 def decrypt_profile(prof):
-    return urldecode(bytes(pkcs_unpad(aes_ecb_decrypt(prof, KEY_13))))
+    return urldecode(bytes(pkcs7_unpad(aes_ecb_decrypt(prof, KEY_13))))
 
 
 # 13
