@@ -391,7 +391,7 @@ def find_dupe_blocks(ciphertext, block_size):
     for i in xrange(len(ciphertext) // block_size):
         block = bytes(ciphertext[i * block_size:(i + 1) * block_size])
         seen[block].add(i)
-    return [v for _, v in seen.iteritems() if len(v) > 1]
+    return [sorted(v) for _, v in seen.iteritems() if len(v) > 1]
 
 
 # 14
@@ -403,32 +403,45 @@ def decrypt_prefixed_ecb(encrypt_fn):
 
     plaintext = bytearray('')
     base_padding = bytearray('A' * block_size)
+    sentinel_text = bytearray(
+        'B' * block_size + 'C' * 2 * block_size + 'B' * block_size)
     for block in itertools.count():
         for char in xrange(block_size):
+            test_text = sentinel_text[:]
             for test_byte in xrange(256):
-                test_text = (base_padding + plaintext)[(-block_size+1):]
+                test_text.extend((base_padding + plaintext)[(-block_size+1):])
                 test_text.append(test_byte)
-                test_text.extend(base_padding[:block_size - 1 - char])
-                found_matches = 0
-                # check for a bunch of matches.  we'll only get it right when
-                # the padding happens to match (1/16 of the time), and we'll
-                # get false positives some small fraction of the time (when our
-                # test-char matches the end of the random prefix), so we do a
-                # bunch of trials and only count a match if it works several
-                # times.
-                for i in xrange(block_size * 15):
-                    if find_dupe_blocks(encrypt_fn(test_text), block_size):
-                        found_matches += 1
-                    if found_matches >= 4:
-                        break
-                if found_matches >= 4:
-                    plaintext.append(test_byte)
-                    break
+            test_text.extend(sentinel_text)
+            test_text.extend(base_padding[:block_size - 1 - char])
+            for i in xrange(block_size * 8):
+                dupes = find_dupe_blocks(encrypt_fn(test_text), block_size)
+                # We expect to see 4 copies of aes(BBBB), 4 of aes(CCCC), and 2
+                # of aes(AAAx)
+                dupes.sort(key=lambda x: x[0])
+                dupes.sort(key=len)
+                if map(len, dupes) != [2, 4, 4]:
+                    continue
+
+                a_blocks, b_blocks, c_blocks = dupes
+                # double-check we have the expected structure:
+                # BBBB CCCC CCCC BBBB AAAx AAAy AAAz BBBB CCCC CCCC BBBB AAA
+                first_b = b_blocks[0]
+                assert b_blocks == [first_b,
+                                    3 + first_b,
+                                    256 + 4 + first_b,
+                                    256 + 7 + first_b], dupes
+                assert c_blocks == [1 + first_b,
+                                    2 + first_b,
+                                    256 + 5 + first_b,
+                                    256 + 6 + first_b], dupes
+                first_a, second_a = a_blocks
+                assert 3 + first_b < first_a < 256 + 4 + first_b, dupes
+                assert second_a == 256 + 7 + first_b, dupes
+
+                next_byte = first_a - first_b - 4
+                plaintext.append(next_byte)
+                print repr(plaintext)
+                break
 
             else:
-                return plaintext
-            print repr(plaintext)
-    return pkcs7_unpad(plaintext)
-
-        
-
+                return pkcs7_unpad(plaintext)
