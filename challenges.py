@@ -3,6 +3,7 @@ import collections
 import itertools
 import os
 import random
+import time
 import urlparse
 import urllib
 
@@ -259,9 +260,7 @@ def encrypt_ecb_12(b):
     return aes_ecb_encrypt(pt, KEY_12)
 
 
-# 12
-def decrypt_ecb(encrypt_fn):
-    # Detect block size
+def detect_block_size(encrypt_fn):
     last_value = encrypt_fn('')
     for i in itertools.count(1):
         this_value = encrypt_fn('A' * i)
@@ -269,13 +268,25 @@ def decrypt_ecb(encrypt_fn):
             break
         else:
             last_value = this_value
-    block_size = i - 1
-    assert block_size == 16, block_size
+    return i - 1
 
-    # Detect ECB
+
+def detect_cipher(encrypt_fn, block_size):
     pt = bytearray('A' * (4 * block_size))
     ct = encrypt_fn(pt)
-    assert ct[block_size:2 * block_size] == ct[2 * block_size:3 * block_size]
+    if ct[block_size:2 * block_size] == ct[2 * block_size:3 * block_size]:
+        return 'ecb'
+    else:
+        raise NotImplementedError
+
+
+
+# 12
+def decrypt_ecb(encrypt_fn):
+    block_size = detect_block_size(encrypt_fn)
+    assert block_size == 16, block_size
+
+    assert detect_cipher(encrypt_fn, block_size) == 'ecb'
 
     # Length-extension attack
     pt = bytearray('')
@@ -314,6 +325,7 @@ def encrypt_profile_for(email):
     return aes_ecb_encrypt(profile_for(email), KEY_13)
 
 
+# 15
 def pkcs7_unpad(b):
     num_bytes = b[-1]
     if len(set(b[-num_bytes:])) == 1:
@@ -336,3 +348,87 @@ def admin_profile():
     # truncate the "user".
     encrypted_prof = encrypt_profile_for('x@example.com')[:32]
     return encrypted_prof + encrypted_admin
+
+
+KEY_14 = rand_aes_key()
+
+
+def encrypt_ecb_14(b):
+    # Always pad at least one block.
+    prefix = bytearray(os.urandom(random.randrange(16, 256)))
+    pt = prefix + b + APPEND_12
+    return aes_ecb_encrypt(pt, KEY_14)
+
+
+def gcf(a, b):
+    if a == 0:
+        return b
+    if b == 0:
+        return a
+    if a < b:
+        b, a = a, b
+    return gcf(b, a % b)
+
+
+def detect_prefixed_block_size(encrypt_fn):
+    max_block = len(encrypt_fn(''))
+    for i in xrange(256):
+        max_block = gcf(max_block, len(encrypt_fn('A' * i)))
+    return max_block
+
+
+def detect_prefixed_cipher(encrypt_fn, block_size):
+    # check for ECB: any two blocks of an encrypted repeating message are the
+    # same.
+    if find_dupe_blocks(encrypt_fn('A' * (256 * block_size)), block_size):
+        return 'ecb'
+    raise NotImplementedError
+
+
+def find_dupe_blocks(ciphertext, block_size):
+    assert len(ciphertext) % block_size == 0
+    seen = collections.defaultdict(set)
+    for i in xrange(len(ciphertext) // block_size):
+        block = bytes(ciphertext[i * block_size:(i + 1) * block_size])
+        seen[block].add(i)
+    return [v for _, v in seen.iteritems() if len(v) > 1]
+
+
+# 14
+def decrypt_prefixed_ecb(encrypt_fn):
+    block_size = detect_prefixed_block_size(encrypt_fn)
+    assert block_size == 16, block_size
+
+    assert detect_prefixed_cipher(encrypt_fn, block_size) == 'ecb'
+
+    plaintext = bytearray('')
+    base_padding = bytearray('A' * block_size)
+    for block in itertools.count():
+        for char in xrange(block_size):
+            for test_byte in xrange(256):
+                test_text = (base_padding + plaintext)[(-block_size+1):]
+                test_text.append(test_byte)
+                test_text.extend(base_padding[:block_size - 1 - char])
+                found_matches = 0
+                # check for a bunch of matches.  we'll only get it right when
+                # the padding happens to match (1/16 of the time), and we'll
+                # get false positives some small fraction of the time (when our
+                # test-char matches the end of the random prefix), so we do a
+                # bunch of trials and only count a match if it works several
+                # times.
+                for i in xrange(block_size * 15):
+                    if find_dupe_blocks(encrypt_fn(test_text), block_size):
+                        found_matches += 1
+                    if found_matches >= 4:
+                        break
+                if found_matches >= 4:
+                    plaintext.append(test_byte)
+                    break
+
+            else:
+                return plaintext
+            print repr(plaintext)
+    return pkcs7_unpad(plaintext)
+
+        
+
