@@ -158,13 +158,19 @@ def find_repeating_key_xor(b):
 
 
 # 7
-def aes_ecb_decrypt(b, k):
+def aes_block_decrypt(b, k):
     cipher = AES.new(bytes(k), AES.MODE_ECB)
     return bytearray(cipher.decrypt(bytes(b)))
 
 
+aes_ecb_decrypt = aes_block_decrypt
+
+
 def aes_ecb_encrypt(b, k):
     b = pkcs7_pad(b)
+    return aes_block_encrypt(b, k)
+
+def aes_block_encrypt(b, k):
     cipher = AES.new(bytes(k), AES.MODE_ECB)
     return bytearray(cipher.encrypt(bytes(b)))
 
@@ -200,7 +206,7 @@ def aes_cbc_decrypt(b, k, iv):
     pt = bytearray()
     for i in xrange(0, len(b), 16):
         this_ct = b[i:i + 16]
-        pt += xor_bytearrays(aes_ecb_decrypt(this_ct, k), last_ct)
+        pt += xor_bytearrays(aes_block_decrypt(this_ct, k), last_ct)
         last_ct = this_ct
     return pt
 
@@ -211,7 +217,7 @@ def aes_cbc_encrypt(b, k, iv):
     ct = bytearray()
     for i in xrange(0, len(b), 16):
         this_pt = b[i:i + 16]
-        last_ct = aes_ecb_encrypt(xor_bytearrays(this_pt, last_ct), k)
+        last_ct = aes_block_encrypt(xor_bytearrays(this_pt, last_ct), k)
         ct += last_ct
     return ct
 
@@ -445,3 +451,37 @@ def decrypt_prefixed_ecb(encrypt_fn):
 
             else:
                 return pkcs7_unpad(plaintext)
+
+
+KEY_16 = rand_aes_key()
+PREFIX_16 = "comment1=cooking%20MCs;userdata="
+SUFFIX_16 = ";comment2=%20like%20a%20pound%20of%20bacon"
+
+def encrypt_cbc_16(b):
+    b = bytes(b).replace(';', '%3B').replace('=', '%3D')
+    nonce = bytearray(rand_aes_key())
+    pt = bytearray(PREFIX_16 + b + SUFFIX_16)
+    return aes_cbc_encrypt(pt, KEY_16, nonce), nonce
+
+
+def decrypt_cbc_16(b, nonce):
+    pt = aes_cbc_decrypt(b, KEY_16, nonce)
+    return ';admin=true;' in pt
+
+
+# 16
+def make_admin_user(encrypt_fn):
+    # drop the nonce
+    block_size = detect_prefixed_block_size(lambda b: encrypt_fn(b)[0])
+    assert block_size == 16, block_size
+
+    # we'll just assume we're in CBC mode
+    padding_len = 16 - (len(PREFIX_16) % 16)  # 16
+    padding = 'x' * padding_len
+    total_prefix = (padding_len + len(PREFIX_16))
+    ct = padding + '\x3aadmin\x3ctrue'
+    ct, nonce = encrypt_fn(ct)
+    bytes_to_fix = [total_prefix - 16, total_prefix - 16 + 6]
+    for byte in bytes_to_fix:
+        ct[byte] = ct[byte] ^ 1
+    return ct, nonce
