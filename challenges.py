@@ -476,12 +476,78 @@ def make_admin_user(encrypt_fn):
     assert block_size == 16, block_size
 
     # we'll just assume we're in CBC mode
-    padding_len = 16 - (len(PREFIX_16) % 16)  # 16
+    padding_len = block_size - (len(PREFIX_16) % block_size)  # 16
     padding = 'x' * padding_len
     total_prefix = (padding_len + len(PREFIX_16))
     ct = padding + '\x3aadmin\x3ctrue'
     ct, nonce = encrypt_fn(ct)
-    bytes_to_fix = [total_prefix - 16, total_prefix - 16 + 6]
+    bytes_to_fix = [total_prefix - block_size, total_prefix - block_size + 6]
     for byte in bytes_to_fix:
-        ct[byte] = ct[byte] ^ 1
+        ct[byte] ^= 1
     return ct, nonce
+
+
+KEY_17 = rand_aes_key()
+
+def encrypt_cbc_17():
+    with open('17.txt') as f:
+        pt = bytearray(base64.b64decode(random.choice(f.read().split())))
+    nonce = bytearray(rand_aes_key())
+    return aes_cbc_encrypt(pt, KEY_17, nonce), nonce
+
+
+def decrypt_cbc_17(ct, nonce):
+    pt = aes_cbc_decrypt(ct, KEY_17, nonce)
+    try:
+        pkcs7_unpad(pt)
+        return True
+    except ValueError:
+        return False
+
+
+# 17
+def cbc_oracle_attack(ct, nonce, decrypt_fn):
+    block_size = 16
+
+    pt = bytearray()
+    for block_i in xrange(len(ct) // block_size):
+        block = bytearray()
+        for i in xrange(block_size):
+            valid_bytes = set()
+            for test_byte in xrange(256):
+                if block_i == 0:
+                    test_ct = ct[:]
+                elif (block_i + 1) * block_size < len(ct):
+                    test_ct = ct[:-block_i * block_size]
+                else:
+                    test_ct = nonce + ct[:block_size]
+                if i == 0:
+                    test_ct[-block_size - 1] ^= test_byte
+                    first = decrypt_fn(test_ct, nonce)
+                    test_ct[-block_size - 2] ^= 1
+                    second = decrypt_fn(test_ct, nonce)
+                    if first and second:
+                        valid_bytes.add(test_byte)
+                else:
+                    for j in xrange(i):
+                        test_ct[- block_size - j - 1] ^= block[- j - 1] ^ (i + 1)
+                    test_ct[- block_size - i - 1] ^= test_byte
+                    if decrypt_fn(test_ct, nonce):
+                        valid_bytes.add(test_byte)
+            assert len(valid_bytes) == 1, (i, valid_bytes)
+            block.insert(0, valid_bytes.pop() ^ (i + 1))
+        pt = block + pt
+    return pt
+
+
+def run_all_cbc_oracle_attacks():
+    plains = set()
+    while len(plains) < 10:
+        ct, nonce = encrypt_cbc_17()
+        plain = cbc_oracle_attack(ct, nonce, decrypt_cbc_17)
+        plains.add(bytes(pkcs7_unpad(plain)))
+    return '\n'.join([x[6:] for x in sorted(plains)])
+
+
+
+
