@@ -3,6 +3,7 @@ import collections
 import itertools
 import os
 import random
+import struct
 import time
 import urlparse
 import urllib
@@ -222,8 +223,8 @@ def aes_cbc_encrypt(b, k, iv):
     return ct
 
 
-def rand_aes_key():
-    return os.urandom(16)
+def rand_aes_key(size=16):
+    return os.urandom(size)
 
 
 def encrypt_either_ecb_cbc(b):
@@ -549,5 +550,23 @@ def run_all_cbc_oracle_attacks():
     return '\n'.join([x[6:] for x in sorted(plains)])
 
 
+def aes_ctr_keystream(k, iv):
+    """A generators of ints, which is mostly close enough to a bytearray."""
+    for i in itertools.count():
+        for c in aes_block_encrypt(iv + struct.pack('<Q', i), k):
+            yield c
+
+# 18
+def aes_ctr_encrypt(ct, k, iv):
+    return xor_bytearrays(ct, aes_ctr_keystream(k, iv))
 
 
+def encrypted_texts_19():
+    k = rand_aes_key()
+    with open('19.txt') as f:
+        texts = [bytearray(base64.b64decode(line)) for line in f]
+    return [aes_ctr_encrypt(text, k, bytearray(8)) for text in texts]
+
+# 19
+# texts = encrypted_texts_19()
+# [(i, xor_bytearrays(xor_bytearrays(texts[37] + 'aaaaaaaaaaaaaaaaaaaaaaa', text), bytearray("He, too, has been changed in his turn, aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))) for i, text in enumerate(texts)]
