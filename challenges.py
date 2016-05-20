@@ -570,3 +570,25 @@ def encrypted_texts_19():
 # 19
 # texts = encrypted_texts_19()
 # [(i, xor_bytearrays(xor_bytearrays(texts[37] + 'aaaaaaaaaaaaaaaaaaaaaaa', text), bytearray("He, too, has been changed in his turn, aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))) for i, text in enumerate(texts)]
+
+
+def encrypted_texts_20():
+    k = rand_aes_key()
+    with open('20.txt') as f:
+        texts = [bytearray(base64.b64decode(line)) for line in f]
+    return [aes_ctr_encrypt(text, k, bytearray(8)) for text in texts]
+
+
+def xor_byte(b, byte):
+    return xor_bytearrays(b, itertools.repeat(byte))
+
+
+# 20
+def decrypt_repeated_otp(cts):
+    keystream = bytearray()
+    for aligned_chars in zip(*cts):
+        likely_key_bytes = sorted(
+            xrange(256),
+            key=lambda byte: plaintext_score(xor_byte(aligned_chars, byte)))
+        keystream.append(likely_key_bytes[0])
+    return [xor_bytearrays(keystream, ct) for ct in cts]
