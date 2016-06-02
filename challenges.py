@@ -625,6 +625,10 @@ class MT19937(object):
             seed = self.w_mask & (self.f * (seed ^ (seed >> (self.w - 2))) + i)
             self._state[i] = seed
 
+    def set_state(self, state):
+        self._state = state[:]
+        self._index = 0
+
     def _twist(self):
         for i in xrange(self.n):
             x = (self._state[i] & self.upper_mask) + (
@@ -643,13 +647,73 @@ class MT19937(object):
             self._twist()
 
         y = self._state[self._index]
-        y = y ^ ((y >> self.u) & self.d)
-        y = y ^ ((y << self.s) & self.b)
-        y = y ^ ((y << self.t) & self.c)
-        y = y ^ (y >> self.l)
-
         self._index += 1
-        return self.w_mask & y
+        return self.temper(y)
+
+    @classmethod
+    def temper(cls, y):
+        y = y ^ ((y >> cls.u) & cls.d)
+        y = y ^ ((y << cls.s) & cls.b)
+        y = y ^ ((y << cls.t) & cls.c)
+        y = y ^ (y >> cls.l)
+        return cls.w_mask & y
+
+
+def wait_rng_wait():
+    time.sleep(random.randrange(40, 1000))
+    rng = MT19937(seed=int(time.time()))
+    time.sleep(random.randrange(40, 1000))
+    return next(rng)
+
+
+# 22
+def crack_seed(val):
+    now = int(time.time())
+    for i in xrange(now - 2000, now):
+        rng = MT19937(seed=i)
+        if val == next(rng):
+            return i
+    raise RuntimeError("Seed not found")
+
+
+def untemper(y):
+    # Each time, we undo the transform y' = y ^ ((y >> x1) & x2)
+    # by recursively computing y = y' ^ ((y >> x1) & x2).
+    # We recurse until adding a layer of recursion no longer affects any bits,
+    # i.e. for 32/x1 iterations.
+
+    # We don't need to iterate because (y >> l) >> l == 0
+    y = y ^ (y >> MT19937.l)
+
+    # we don't need to iterate because ((y << t) & c) << t == 0
+    y = y ^ (int32(y << MT19937.t) & MT19937.c)
+
+    y_orig = y
+    for _ in xrange(MT19937.w // MT19937.s):
+        y = y_orig ^ (int32(y << MT19937.s) & MT19937.b)
+
+    y_orig = y
+    for _ in xrange(MT19937.w // MT19937.u):
+        y = y_orig ^ ((y >> MT19937.u) & MT19937.d)
+
+    return y
 
 
 
+# 23
+def clone_mt(vals):
+    assert len(vals) == MT19937.n, vals
+    
+    state = []
+    for val in vals:
+        assert MT19937.temper(untemper(val)) == val, val
+        state.append(untemper(val))
+
+    clone = MT19937()
+    clone.set_state(state)
+    # Check that we were correct
+    clone_vals = list(itertools.islice(clone, MT19937.n))
+    assert clone_vals == vals, zip(clone_vals, vals)
+    # reset the state again.
+    clone.set_state(state)
+    return clone
