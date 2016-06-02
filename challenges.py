@@ -592,3 +592,64 @@ def decrypt_repeated_otp(cts):
             key=lambda byte: plaintext_score(xor_byte(aligned_chars, byte)))
         keystream.append(likely_key_bytes[0])
     return [xor_bytearrays(keystream, ct) for ct in cts]
+
+
+def int32(n):
+    return n & 0xffffffff
+
+
+# 21
+class MT19937(object):
+    w = 32
+    w_mask = 0xffffffff
+    n = 624
+    m = 397
+    r = 31
+    lower_mask = (1 << r) - 1  # 0x7fffffff
+    upper_mask = w_mask & ~lower_mask  # 0x80000000
+    a = 0x9908b0df
+    u, d = 11, 0xffffffff
+    s, b = 7, 0x9d2c5680
+    t, c = 15, 0xefc60000
+    l = 18
+    f = 0x6c078965
+
+    def __init__(self, seed=0):
+        self._state = [None] * self.n
+        self._set_seed(seed)
+
+    def _set_seed(self, seed):
+        self._index = self.n
+        self._state[0] = seed
+        for i in xrange(1, self.n):
+            seed = self.w_mask & (self.f * (seed ^ (seed >> (self.w - 2))) + i)
+            self._state[i] = seed
+
+    def _twist(self):
+        for i in xrange(self.n):
+            x = (self._state[i] & self.upper_mask) + (
+                self._state[(i+1) % self.n] & self.lower_mask)
+            y = x >> 1
+            if x % 2:
+                y = y ^ self.a
+            self._state[i] = self._state[(i+self.m) % self.n] ^ y
+        self._index = 0
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        if self._index == self.n:
+            self._twist()
+
+        y = self._state[self._index]
+        y = y ^ ((y >> self.u) & self.d)
+        y = y ^ ((y << self.s) & self.b)
+        y = y ^ ((y << self.t) & self.c)
+        y = y ^ (y >> self.l)
+
+        self._index += 1
+        return self.w_mask & y
+
+
+
