@@ -9,6 +9,7 @@ import urlparse
 import urllib
 
 from Crypto.Cipher import AES
+import tqdm
 
 
 def from_hex(x):
@@ -716,4 +717,62 @@ def clone_mt(vals):
     assert clone_vals == vals, zip(clone_vals, vals)
     # reset the state again.
     clone.set_state(state)
+    # Now replay those same values, double-checking as we go.
+    for val in vals:
+        assert clone.next() == val
     return clone
+
+
+def test_clone_mt(seed=238479283):
+    mt = MT19937(seed)
+    mt2 = clone_mt(list(itertools.islice(mt, mt.n)))
+    for a, b in itertools.islice(itertools.izip(mt, mt2), mt.n * 10):
+        assert a == b
+
+
+def ints_to_bytes(iterable):
+    for i in iterable:
+        for byte in xrange(4):
+            yield (i >> (8 * byte)) & 0xff
+
+
+def mt_keystream(seed):
+    return ints_to_bytes(MT19937(seed))
+
+
+# 24
+def mt_encrypt(seed, plain):
+    return xor_bytearrays(bytearray(plain), mt_keystream(seed))
+
+
+def test_mt_encryption():
+    plain = os.urandom(random.randrange(64)) + 'A' * 14
+    k = random.randrange(65536)
+    cipher = mt_encrypt(k, plain)
+    assert plain == mt_encrypt(k, cipher)
+
+
+def decrypt_mt_encryption():
+    plain = os.urandom(random.randrange(64)) + 'A' * 14
+    k = random.randrange(65536)
+    cipher = mt_encrypt(k, plain)
+    for test_k in tqdm.tqdm(xrange(65536)):
+        if mt_encrypt(test_k, cipher)[-14:] == bytearray('A' * 14):
+            assert test_k == k
+            return k
+    assert False
+
+
+def make_token():
+    k = int(time.time())
+    return base64.b64encode(bytearray(itertools.islice(mt_keystream(k), 40)))
+
+
+def check_token(token):
+    fuzz = 100
+    t = int(time.time())
+    ct = base64.b64decode(token)
+    for test_k in xrange(t - fuzz, t + fuzz):
+        if bytearray(itertools.islice(mt_keystream(test_k), len(ct))) == ct:
+            return True
+    return False
