@@ -776,3 +776,57 @@ def check_token(token):
         if bytearray(itertools.islice(mt_keystream(test_k), len(ct))) == ct:
             return True
     return False
+
+
+# 25
+KEY_25 = rand_aes_key()
+IV_25 = os.urandom(8)
+
+
+def get_plain_25():
+    with open('25.txt') as f:
+        return aes_ecb_decrypt(bytearray(base64.b64decode(f.read())),
+                               "YELLOW SUBMARINE")
+
+
+def edit(ciphertext, offset, newtext):
+    plaintext = aes_ctr_encrypt(ciphertext, KEY_25, IV_25)
+    plaintext[offset:offset + len(newtext)] = newtext
+    return aes_ctr_encrypt(plaintext, KEY_25, IV_25)
+
+
+def crack_random_access_ctr(plaintext):
+    ciphertext = aes_ctr_encrypt(plaintext, KEY_25, IV_25)
+    newtext = bytearray('\x00' * len(ciphertext))
+    new_plaintext = xor_bytearrays(edit(ciphertext, 0, newtext),
+                                   ciphertext)
+    print new_plaintext
+    assert new_plaintext == plaintext
+
+
+# 26
+KEY_26 = rand_aes_key()
+PREFIX_26 = "comment1=cooking%20MCs;userdata="
+SUFFIX_26 = ";comment2=%20like%20a%20pound%20of%20bacon"
+
+def encrypt_ctr_26(b):
+    b = bytes(b).replace(';', '%3B').replace('=', '%3D')
+    iv = os.urandom(8)
+    pt = bytearray(PREFIX_26 + b + SUFFIX_26)
+    return aes_ctr_encrypt(pt, KEY_26, iv), iv
+
+
+def decrypt_ctr_26(b, iv):
+    pt = aes_ctr_encrypt(b, KEY_26, iv)
+    return ';admin=true;' in pt
+
+
+# 16
+def make_admin_user_ctr(encrypt_fn):
+    # we'll just assume we're in CTR mode
+    text = '\x3aadmin\x3ctrue'
+    ct, iv = encrypt_fn(text)
+    bytes_to_fix = [len(PREFIX_26), len(PREFIX_26) + 6]
+    for byte in bytes_to_fix:
+        ct[byte] ^= 1
+    return ct, iv
