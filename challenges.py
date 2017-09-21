@@ -6,9 +6,9 @@ import random
 import struct
 import time
 import urlparse
-import urllib
 
 from Crypto.Cipher import AES
+import sha1
 import tqdm
 
 
@@ -809,6 +809,7 @@ KEY_26 = rand_aes_key()
 PREFIX_26 = "comment1=cooking%20MCs;userdata="
 SUFFIX_26 = ";comment2=%20like%20a%20pound%20of%20bacon"
 
+
 def encrypt_ctr_26(b):
     b = bytes(b).replace(';', '%3B').replace('=', '%3D')
     iv = os.urandom(8)
@@ -821,7 +822,6 @@ def decrypt_ctr_26(b, iv):
     return ';admin=true;' in pt
 
 
-# 16
 def make_admin_user_ctr(encrypt_fn):
     # we'll just assume we're in CTR mode
     text = '\x3aadmin\x3ctrue'
@@ -830,3 +830,93 @@ def make_admin_user_ctr(encrypt_fn):
     for byte in bytes_to_fix:
         ct[byte] ^= 1
     return ct, iv
+
+
+# 27
+KEY_27 = rand_aes_key()
+PREFIX_27 = "comment1=cooking%20MCs;userdata="
+SUFFIX_27 = ";comment2=%20like%20a%20pound%20of%20bacon"
+
+
+def encrypt_cbc_27(b):
+    b = bytes(b).replace(';', '%3B').replace('=', '%3D')
+    pt = bytearray(PREFIX_27 + b + SUFFIX_27)
+    return aes_cbc_encrypt(pt, KEY_27, bytearray(KEY_27))
+
+
+def decrypt_cbc_27(b):
+    pt = aes_cbc_decrypt(b, KEY_27, bytearray(KEY_27))
+    if all(i < 128 for i in pt):
+        return ';admin=true;' in pt
+    else:
+        raise ValueError(pt)
+
+
+def find_key_27():
+    pt = 'a' * 48   # at least 3 blocks
+    ct = encrypt_cbc_27(pt)
+    ct[16:32] = '\x00' * 16
+    ct[32:48] = ct[:16]
+    try:
+        decrypt_cbc_27(ct)
+        raise RuntimeError("That should have failed.")
+    except ValueError as e:
+        return xor_bytearrays(bytearray(e.message[:16]),
+                              bytearray(e.message[32:48])) == KEY_27
+
+
+# 28
+def sha1_keyed_mac(message, key):
+    return sha1.sha1(key + message)
+
+
+def check_sha1_keyed_mac(message, key, mac):
+    return sha1_keyed_mac(message, key) == mac
+
+
+# 29
+def compute_padding(message_byte_length):
+    # cribbed from sha1._produce_digest
+    padding = b'\x80'
+    padding += b'\x00' * ((56 - (message_byte_length + 1) % 64) % 64)
+    message_bit_length = message_byte_length * 8
+    padding += struct.pack(b'>Q', message_bit_length)
+    return padding
+
+
+def extend_sha1(old_digest, old_byte_length, extension):
+    registers = tuple(int(old_digest[i:i + 8], 16)
+                      for i in xrange(0, len(old_digest), 8))
+    padding = compute_padding(old_byte_length)
+    hasher = sha1.Sha1Hash()
+    hasher._h = registers
+    hasher._message_byte_length = old_byte_length + len(padding)
+    hasher.update(extension)
+    return (padding + extension, hasher.hexdigest())
+
+
+MESSAGE_29 = ("comment1=cooking%20MCs;userdata=foo;"
+              "comment2=%20like%20a%20pound%20of%20bacon")
+_KEY_29 = None
+
+
+def get_key_29():
+    global _KEY_29
+    if _KEY_29 is None:
+        with open('/usr/share/dict/words') as f:
+            _KEY_29 = random.choice(f.readlines()).strip()
+    return _KEY_29
+
+
+def make_cookie():
+    return MESSAGE_29, sha1_keyed_mac(MESSAGE_29, get_key_29())
+
+
+def find_sha1_extension(msg, mac):
+    for i in xrange(30):
+        try:
+            full_ext, new_mac = extend_sha1(mac, i + len(msg), ';admin=true')
+            if check_sha1_keyed_mac(msg + full_ext, get_key_29(), new_mac):
+                return msg + full_ext, new_mac
+        except Exception:
+            pass
