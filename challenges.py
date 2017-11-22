@@ -8,6 +8,7 @@ import time
 import urlparse
 
 from Crypto.Cipher import AES
+import md4
 import sha1
 import tqdm
 
@@ -875,10 +876,10 @@ def check_sha1_keyed_mac(message, key, mac):
 
 
 # 29
-def compute_padding(message_byte_length):
+def compute_sha1_padding(message_byte_length):
     # cribbed from sha1._produce_digest
     padding = b'\x80'
-    padding += b'\x00' * ((56 - (message_byte_length + 1) % 64) % 64)
+    padding += b'\x00' * ((55 - message_byte_length) % 64)
     message_bit_length = message_byte_length * 8
     padding += struct.pack(b'>Q', message_bit_length)
     return padding
@@ -887,7 +888,7 @@ def compute_padding(message_byte_length):
 def extend_sha1(old_digest, old_byte_length, extension):
     registers = tuple(int(old_digest[i:i + 8], 16)
                       for i in xrange(0, len(old_digest), 8))
-    padding = compute_padding(old_byte_length)
+    padding = compute_sha1_padding(old_byte_length)
     hasher = sha1.Sha1Hash()
     hasher._h = registers
     hasher._message_byte_length = old_byte_length + len(padding)
@@ -908,7 +909,7 @@ def get_key_29():
     return _KEY_29
 
 
-def make_cookie():
+def make_sha1_cookie():
     return MESSAGE_29, sha1_keyed_mac(MESSAGE_29, get_key_29())
 
 
@@ -917,6 +918,49 @@ def find_sha1_extension(msg, mac):
         try:
             full_ext, new_mac = extend_sha1(mac, i + len(msg), ';admin=true')
             if check_sha1_keyed_mac(msg + full_ext, get_key_29(), new_mac):
+                return msg + full_ext, new_mac
+        except Exception:
+            pass
+
+
+# 30
+def md4_keyed_mac(message, key):
+    return base64.b16encode(md4.MD4().add(key + message).finish()).lower()
+
+
+def check_md4_keyed_mac(message, key, mac):
+    return md4_keyed_mac(message, key) == mac
+
+
+def make_md4_cookie():
+    return MESSAGE_29, md4_keyed_mac(MESSAGE_29, get_key_29())
+
+
+def compute_md4_padding(message_byte_length):
+    # cribbed from sha1._produce_digest
+    padding = b'\x80'
+    padding += b'\x00' * ((55 - message_byte_length) % 64)
+    message_bit_length = message_byte_length * 8
+    padding += struct.pack('<Q', message_bit_length)
+    return padding
+
+
+def extend_md4(old_digest, old_byte_length, extension):
+    registers = list(
+        struct.unpack('<4I', base64.b16decode(old_digest.upper())))
+    padding = compute_md4_padding(old_byte_length)
+    hasher = md4.MD4()
+    hasher.h = registers
+    hasher.count = (old_byte_length + len(padding)) // 64
+    hasher.add(extension)
+    return (padding + extension, base64.b16encode(hasher.finish()).lower())
+
+
+def find_md4_extension(msg, mac):
+    for i in xrange(30):
+        try:
+            full_ext, new_mac = extend_md4(mac, i + len(msg), ';admin=true')
+            if check_md4_keyed_mac(msg + full_ext, get_key_29(), new_mac):
                 return msg + full_ext, new_mac
         except Exception:
             pass
